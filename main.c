@@ -16,16 +16,25 @@
 
 #define SIZE 300
 #define ARG 2
+#define FINAL "final.txt"
+#define EXE "a.out"
+#define EXCELLENT ",100,GREAT_JOB\n"
+#define TIMEOUT ", 40,TIMEOUT\n"
+#define GOOD ",80,SIMILAR_OUTPUT\n"
+#define BAD ",60,BAD_OUTPUT\n"
+#define COMPILE ",20,COMPILATION_ERROR\n"
+#define MISS " ,0,NoCFile\n"
 
 static char firstLine[SIZE];
 static char secondLine[SIZE];
 static char thirdLine[SIZE];
 static char theRealPath[SIZE];
 
-void removeEnd(char *path);
 
-void execute(char *path);
-
+/**
+ * @param path the path of the file
+ * @return the name of the file
+ */
 char *getLastPath(const char *path) {
     char name[SIZE];
     const char *del = &path[strlen(path)];
@@ -89,23 +98,43 @@ void write_to_file(int fd, char *text) {
         _exit(1);
     }
 }
+/**
+ * @param path and we just delete the last directory we been
+ */
+void removeEnd(char *path) {
+    char *del = &path[strlen(path)];
+    unsigned int i = strlen(path);
+    while (del > path && *del != '/') {
+        del--;
+        path[i] = '\0';
+    }
 
-void writeErorToFile(const char *path, const char *typeError) {
+    if (*del == '/')
+        *del = '\0';
+    memcpy(path, path, i);
+}
+/**
+ *
+ * @param path of the file
+ * @param typeError which error we write
+ */
+void writeErrorToFile(const char *path, const char *typeError) {
+    // change directory to the path of our work
     chdir(theRealPath);
-    int final = open("final.txt", O_RDWR | O_APPEND | O_CREAT, 0777);
+    // open the file
+    int final = open(FINAL, O_RDWR | O_APPEND | O_CREAT, 0777);
+    // print the path
     char *buffer = getLastPath(path);
     if (final == -1) {
         write(2, ERROR, sizeof(ERROR) - 1);
         _exit(1);
     }
-    char *set;
-    write(final, buffer, strlen(buffer));
+    write_to_file(final, buffer);
     if (strcmp(typeError, "errorCompile") == 0)
-        set = ",20,COMPILATION_ERROR\n";
+        write_to_file(final,COMPILE);
     else if (strcmp(typeError, "NoCFile") == 0) {
-        set = " ,0,NoCFile\n";
+      write_to_file(final,MISS);
     }
-    write(final, set, strlen(set));
     close(final);
 }
 
@@ -135,7 +164,7 @@ void compile(const char *argv, const char *nameFile) {
         int exit_status = WEXITSTATUS(pid);
         // child exit was not good(doesn't compile).
         if (exit_status) {
-            writeErorToFile(argv, "errorCompile");
+            writeErrorToFile(argv, "errorCompile");
         }
     }
 }
@@ -152,15 +181,15 @@ int fileIsC(char *name) {
  * @param dip
  * @param dp
  * @param path the path
+ * @param count how many time we go deep.
  * get into each directory and compile the c files.
  */
-void openFolder(DIR *dip, struct dirent *dp, char path[SIZE]) {
+void openFolders(DIR *dip, struct dirent *dp, char *path,int count) {
     int flagCfile = 0;
-    int countFolder = 0;
     DIR *temp = NULL;
     while ((dp = readdir(dip)) != NULL) {
         if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0
-            || strcmp(dp->d_name, "a.out") == 0)
+            || strcmp(dp->d_name, EXE) == 0)
             continue;
         if (fileIsC(dp->d_name)) {
             flagCfile = 1;
@@ -169,84 +198,42 @@ void openFolder(DIR *dip, struct dirent *dp, char path[SIZE]) {
             getcwd(path, sizeof(path));
             strcat(path, "/");
             strcat(path, dp->d_name);
-            countFolder++;
             if ((temp = opendir(path)) != NULL) {
-                --countFolder;
-                openFolder(temp, dp, path);
-            } else removeEnd(path);
+                openFolders(temp, dp, path,count+1);
+            } else {
+                removeEnd(path);
+
+            }
         }
     }
-    if (!flagCfile && countFolder > 0) {
-        writeErorToFile(path, "NoCFile");
+    if (!flagCfile && count==1) {
+        writeErrorToFile(path, "NoCFile");
     }
     removeEnd(path);
     closedir(temp);
 }
 
-/**
- * @param path and we just delete the last directory we been
- */
-void removeEnd(char *path) {
-    char *del = &path[strlen(path)];
-    unsigned int i = strlen(path);
-    while (del > path && *del != '/') {
-        del--;
-        path[i] = '\0';
-    }
-
-    if (*del == '/')
-        *del = '\0';
-    memcpy(path, path, i);
-}
 
 /**
- *
- * @param dip the DIR
- * @param dp direct struct
- * @param path the path
- * the function is a recusion, just find each directory the file a.out and send it
- * to runAout
+ * @param time how much time our program pass
+ * @param path our path of the file
  */
-void runProg(DIR *dip, struct dirent *dp, char path[SIZE]) {
-    DIR *temp;
-    while ((dp = readdir(dip)) != NULL) {
-        if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0)
-            continue;
-        if (strcmp(dp->d_name, "a.out") == 0) {
-            execute(path);
-            removeEnd(path);
-            break;
-        } else {
-            getcwd(path, sizeof(path));
-            strcat(path, "/");
-            strcat(path, dp->d_name);
-            if ((temp = opendir(path)) != NULL) {
-                runProg(temp, dp, path);
-            } else removeEnd(path);
-        }
-    }
-    removeEnd(path);
-}
-
-
 void compareResult(int time, char *path) {
     pid_t pid;
     int exit_status;
     char *buffer = getLastPath(path);
-    char *r = theRealPath;
     chdir(theRealPath);
     strcat(path, "/out.txt");
     char *args[] = {"./comp.out", thirdLine, path, NULL};
-    int final = open("final.txt", O_RDWR | O_APPEND | O_CREAT, 0777);
-    char *set;
+    int final = open(FINAL, O_RDWR | O_APPEND | O_CREAT, 0777);
     if (final == -1) {
         write(2, ERROR, sizeof(ERROR) - 1);
         _exit(1);
     }
+    // if the file.c was longer then 51 second
     if (time >= 51) {
-        write(final, buffer, strlen(buffer));
-        set = ", 40,TIMEOUT\n";
-        write(final, set, strlen(set));
+        write_to_file(final, buffer);
+        write_to_file(final,TIMEOUT);
     } else {
         if ((pid = fork()) < 0) {     /* fork a child process           */
             printf("*** ERROR: forking child process failed\n");
@@ -257,24 +244,23 @@ void compareResult(int time, char *path) {
             execvp(args[0], args);
             /* run the command  */
         else {
+            // wait for the child process.
             waitpid(pid, &exit_status, WCONTINUED);
+            // how the comp.out was finish
             exit_status = WEXITSTATUS(exit_status);
             write(final, buffer, strlen(buffer));
             switch (exit_status) {
                 case 1:
-                    set = ",100,GREAT_JOB\n";
-
-                    write_to_file(final, set);
+                    write_to_file(final, EXCELLENT);
                     break;
                 case 2:
-                    set = ",60,BAD_OUTPUT\n";
-                    write_to_file(final, set);
+                    write_to_file(final, BAD);
                     break;
                 case 3:
-                    set = ",80,SIMILAR_OUTPUT\n";
-                    write_to_file(final, set);
+                    write_to_file(final, GOOD);
                     break;
-
+                default:
+                    break;
             }
             close(final);
         }
@@ -282,7 +268,9 @@ void compareResult(int time, char *path) {
     }
 
 }
-
+/**
+ * @param path run the a.out
+ */
 void execute(char *path) {
     if (chdir(path) < 0) {
         perror("lsh");
@@ -292,7 +280,7 @@ void execute(char *path) {
     pid_t pid;
     stdin = dup(0);
     stdout = dup(1);
-    char *grep_args[] = {"./a.out", NULL};
+    char *mission[] = {"./a.out", NULL};
 
     // open input and output files
 
@@ -304,22 +292,17 @@ void execute(char *path) {
     }
 
     // replace standard input with input file
-
     dup2(in, 0);
-
     // replace standard output with output file
-
     dup2(out, 1);
 
-    // close unused file descriptors
-
-    // execute grep
+    // execute mission
 
     if ((pid = fork()) < 0) {     /* fork a child process           */
         printf("*** ERROR: forking child process failed\n");
     } else if (pid == 0) {
         /* for the child process:         */
-        if (execvp(grep_args[0], grep_args) < 0) {     /* compile the command  */
+        if (execvp(mission[0], mission) < 0) {     /* compile the command  */
             exit(1);
         }
     } else {                                  /* for the parent:      */
@@ -335,6 +318,37 @@ void execute(char *path) {
         compareResult(time, path);
     }
 
+}
+
+
+
+/**
+ *
+ * @param dip the DIR
+ * @param dp direct struct
+ * @param path the path
+ * the function is a recusion, just find each directory the file a.out and send it
+ * to runAout
+ */
+void runProg(DIR *dip, struct dirent *dp, char path[SIZE]) {
+    DIR *temp;
+    while ((dp = readdir(dip)) != NULL) {
+        if (strcmp(dp->d_name, ".") == 0 || strcmp(dp->d_name, "..") == 0)
+            continue;
+        if (strcmp(dp->d_name, EXE) == 0) {
+            execute(path);
+            removeEnd(path);
+            break;
+        } else {
+            getcwd(path, sizeof(path));
+            strcat(path, "/");
+            strcat(path, dp->d_name);
+            if ((temp = opendir(path)) != NULL) {
+                runProg(temp, dp, path);
+            } else removeEnd(path);
+        }
+    }
+    removeEnd(path);
 }
 
 
@@ -355,17 +369,17 @@ DIR *openDirectory() {
 
 int main(int argc, char **argv) {
     if (argc != ARG) return 1;
-    // get the path of the project and save it.
+    /// get the path of the project and save it.
     getcwd(theRealPath, sizeof(theRealPath));
     int file = 0;
-    // open the file
+    /// open the file
     if ((file = open(argv[1], O_RDWR | O_APPEND)) < -1) return 1;
     // close file
     /// get the lines of the file.
     readText(file, firstLine, secondLine, thirdLine);
     close(file);
     DIR *dip = openDirectory();
-    // change directory to the first line
+    /// change directory to the first line
     chdir(firstLine);
     struct direct *sd;
     char path[SIZE];
@@ -373,7 +387,7 @@ int main(int argc, char **argv) {
     char savePath[SIZE];
     strcpy(savePath, path);
     /// open the folders
-    openFolder(dip, sd, path);
+    openFolders(dip, sd, path,0);
     dip = openDirectory();
     /// run and compare all the program
     runProg(dip, sd, savePath);
